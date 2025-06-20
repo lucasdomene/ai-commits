@@ -2,8 +2,8 @@
 
 ## Phase 1: Core Setup
 - [x] Initialize TypeScript/Node.js project
-- [ ] Setup CLI framework (commander.js)
-- [ ] Create basic project structure
+- [x] Setup CLI framework (commander.js)
+- [x] Create basic project structure
 - [ ] Setup build and dev scripts
 
 ## Phase 2: Git Integration
