@@ -7,8 +7,8 @@
 - [x] Setup build and dev scripts
 
 ## Phase 2: Git Integration
-- [ ] Implement git diff --staged parsing
-- [ ] Add git status validation (ensure staged changes exist)
+- [x] Implement git diff --staged parsing
+- [x] Add git status validation (ensure staged changes exist)
 - [ ] Create git commit functionality
 - [ ] Add error handling for git operations
 

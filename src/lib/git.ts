@@ -52,9 +52,141 @@ export async function hasStagedChanges(): Promise<boolean> {
 }
 
 /**
+ * Validate git repository and staged changes
+ */
+export async function validateGitState(): Promise<void> {
+  // Check if we're in a git repository
+  if (!(await isGitRepository())) {
+    throw new GitError('Not in a git repository. Please run this command from within a git repository.');
+  }
+
+  // Check if there are any staged changes
+  if (!(await hasStagedChanges())) {
+    const status = await getGitStatus();
+    
+    if (status.unstaged.length > 0) {
+      throw new GitError(
+        `No staged changes found. You have ${status.unstaged.length} unstaged file(s).\n` +
+        'Please stage your changes first:\n' +
+        '  git add <files>  # Stage specific files\n' +
+        '  git add .        # Stage all changes'
+      );
+    }
+    
+    if (status.untracked.length > 0) {
+      throw new GitError(
+        `No staged changes found. You have ${status.untracked.length} untracked file(s).\n` +
+        'Please stage your changes first:\n' +
+        '  git add <files>  # Stage specific files\n' +
+        '  git add .        # Stage all changes'
+      );
+    }
+    
+    throw new GitError(
+      'No staged changes found. Please stage some changes before generating a commit message:\n' +
+      '  git add <files>  # Stage specific files\n' +
+      '  git add .        # Stage all changes'
+    );
+  }
+}
+
+/**
+ * Get git status information
+ */
+export async function getGitStatus(): Promise<{
+  staged: string[];
+  unstaged: string[];
+  untracked: string[];
+}> {
+  try {
+    const output = execGitCommand('status --porcelain');
+    const lines = output.trim().split('\n').filter(line => line.trim());
+    
+    const staged: string[] = [];
+    const unstaged: string[] = [];
+    const untracked: string[] = [];
+    
+    for (const line of lines) {
+      if (line.length < 3) continue;
+      
+      const stagedStatus = line[0];
+      const unstagedStatus = line[1];
+      const filePath = line.slice(3);
+      
+      // Check staged status (first character)
+      if (stagedStatus !== ' ' && stagedStatus !== '?') {
+        staged.push(filePath);
+      }
+      
+      // Check unstaged status (second character)  
+      if (unstagedStatus !== ' ' && unstagedStatus !== '?') {
+        unstaged.push(filePath);
+      }
+      
+      // Check for untracked files
+      if (stagedStatus === '?' && unstagedStatus === '?') {
+        untracked.push(filePath);
+      }
+    }
+    
+    return { staged, unstaged, untracked };
+  } catch (error) {
+    throw new GitError(`Failed to get git status: ${error}`);
+  }
+}
+
+/**
+ * Get detailed status information with file counts and examples
+ */
+export async function getDetailedGitStatus(): Promise<{
+  staged: { count: number; files: string[] };
+  unstaged: { count: number; files: string[] };
+  untracked: { count: number; files: string[] };
+  summary: string;
+}> {
+  const status = await getGitStatus();
+  
+  const staged = {
+    count: status.staged.length,
+    files: status.staged.slice(0, 5) // Show first 5 files
+  };
+  
+  const unstaged = {
+    count: status.unstaged.length,
+    files: status.unstaged.slice(0, 5)
+  };
+  
+  const untracked = {
+    count: status.untracked.length,
+    files: status.untracked.slice(0, 5)
+  };
+  
+  // Generate summary message
+  let summary = '';
+  if (staged.count > 0) {
+    summary += `${staged.count} staged file(s)`;
+  }
+  if (unstaged.count > 0) {
+    summary += summary ? `, ${unstaged.count} unstaged file(s)` : `${unstaged.count} unstaged file(s)`;
+  }
+  if (untracked.count > 0) {
+    summary += summary ? `, ${untracked.count} untracked file(s)` : `${untracked.count} untracked file(s)`;
+  }
+  
+  if (!summary) {
+    summary = 'Working directory clean';
+  }
+  
+  return { staged, unstaged, untracked, summary };
+}
+
+/**
  * Get the diff of staged changes
  */
 export async function getStagedDiff(): Promise<GitDiff> {
+  // Validate git state before getting diff
+  await validateGitState();
+  
   try {
     // Get the diff with file stats
     const diffOutput = execGitCommand('diff --staged --numstat');
@@ -180,17 +312,5 @@ function calculateSummary(files: GitFile[]): GitDiff['summary'] {
  */
 export async function commitChanges(message: string): Promise<void> {
   // TODO: Phase 2 - Implement git commit functionality
-  throw new Error('Not implemented - Phase 2');
-}
-
-/**
- * Get git status information
- */
-export async function getGitStatus(): Promise<{
-  staged: string[];
-  unstaged: string[];
-  untracked: string[];
-}> {
-  // TODO: Phase 2 - Implement git status parsing
   throw new Error('Not implemented - Phase 2');
 } 
