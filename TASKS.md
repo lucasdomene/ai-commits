@@ -4,7 +4,7 @@
 - [x] Initialize TypeScript/Node.js project
 - [x] Setup CLI framework (commander.js)
 - [x] Create basic project structure
-- [ ] Setup build and dev scripts
+- [x] Setup build and dev scripts
 
 ## Phase 2: Git Integration
 - [ ] Implement git diff --staged parsing
