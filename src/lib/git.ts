@@ -91,6 +91,184 @@ export async function validateGitState(): Promise<void> {
 }
 
 /**
+ * Validate commit message format
+ */
+export function validateCommitMessage(message: string): void {
+  if (!message || !message.trim()) {
+    throw new GitError('Commit message cannot be empty');
+  }
+
+  const trimmedMessage = message.trim();
+  
+  // Check minimum length
+  if (trimmedMessage.length < 10) {
+    throw new GitError('Commit message is too short (minimum 10 characters)');
+  }
+
+  // Check maximum length for first line
+  const firstLine = trimmedMessage.split('\n')[0];
+  if (firstLine.length > 100) {
+    throw new GitError('Commit message first line is too long (maximum 100 characters)');
+  }
+
+  // Check for conventional commit format (optional but recommended)
+  const conventionalPattern = /^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\(.+\))?: .+/;
+  if (!conventionalPattern.test(firstLine)) {
+    console.warn('⚠️  Commit message does not follow conventional commit format');
+    console.warn('   Recommended format: type(scope): description');
+    console.warn('   Example: feat(auth): add user authentication');
+  }
+}
+
+/**
+ * Commit changes with the given message
+ */
+export async function commitChanges(message: string): Promise<void> {
+  try {
+    // Validate git state first
+    await validateGitState();
+    
+    // Validate commit message
+    validateCommitMessage(message);
+    
+    // Execute git commit
+    const output = execGitCommand(`commit -m "${message.replace(/"/g, '\\"')}"`);
+    
+    // Parse commit output to get commit hash
+    const commitMatch = output.match(/\[.+\s([a-f0-9]+)\]/);
+    const commitHash = commitMatch ? commitMatch[1] : 'unknown';
+    
+    console.log(`✅ Commit successful: ${commitHash}`);
+    
+    // Show commit summary
+    const summary = parseCommitOutput(output);
+    if (summary.filesChanged > 0) {
+      console.log(`📊 ${summary.filesChanged} file(s) changed, ${summary.insertions} insertion(s), ${summary.deletions} deletion(s)`);
+    }
+    
+  } catch (error) {
+    if (error instanceof GitError) {
+      throw error;
+    }
+    throw new GitError(`Failed to commit changes: ${error}`);
+  }
+}
+
+/**
+ * Commit changes with a multi-line message (subject + body)
+ */
+export async function commitChangesWithBody(subject: string, body?: string): Promise<void> {
+  try {
+    // Validate git state first
+    await validateGitState();
+    
+    // Construct full message
+    const fullMessage = body ? `${subject}\n\n${body}` : subject;
+    
+    // Validate commit message
+    validateCommitMessage(fullMessage);
+    
+    // Use git commit with -F flag for multi-line messages
+    const tempFile = '/tmp/ai-commits-message.txt';
+    require('fs').writeFileSync(tempFile, fullMessage);
+    
+    try {
+      const output = execGitCommand(`commit -F "${tempFile}"`);
+      
+      // Clean up temp file
+      require('fs').unlinkSync(tempFile);
+      
+      // Parse commit output
+      const commitMatch = output.match(/\[.+\s([a-f0-9]+)\]/);
+      const commitHash = commitMatch ? commitMatch[1] : 'unknown';
+      
+      console.log(`✅ Commit successful: ${commitHash}`);
+      
+      // Show commit summary
+      const summary = parseCommitOutput(output);
+      if (summary.filesChanged > 0) {
+        console.log(`📊 ${summary.filesChanged} file(s) changed, ${summary.insertions} insertion(s), ${summary.deletions} deletion(s)`);
+      }
+      
+    } catch (error) {
+      // Clean up temp file on error
+      try {
+        require('fs').unlinkSync(tempFile);
+      } catch {}
+      throw error;
+    }
+    
+  } catch (error) {
+    if (error instanceof GitError) {
+      throw error;
+    }
+    throw new GitError(`Failed to commit changes: ${error}`);
+  }
+}
+
+/**
+ * Parse git commit output to extract summary information
+ */
+function parseCommitOutput(output: string): {
+  filesChanged: number;
+  insertions: number;
+  deletions: number;
+} {
+  // Look for patterns like "1 file changed, 5 insertions(+), 2 deletions(-)"
+  const summaryMatch = output.match(/(\d+) files? changed(?:, (\d+) insertions?\(\+\))?(?:, (\d+) deletions?\(-\))?/);
+  
+  if (summaryMatch) {
+    return {
+      filesChanged: parseInt(summaryMatch[1], 10) || 0,
+      insertions: parseInt(summaryMatch[2], 10) || 0,
+      deletions: parseInt(summaryMatch[3], 10) || 0
+    };
+  }
+  
+  return { filesChanged: 0, insertions: 0, deletions: 0 };
+}
+
+/**
+ * Get the last commit information
+ */
+export async function getLastCommit(): Promise<{
+  hash: string;
+  subject: string;
+  author: string;
+  date: string;
+}> {
+  try {
+    const output = execGitCommand('log -1 --pretty=format:"%H|%s|%an|%ad" --date=short');
+    const parts = output.split('|');
+    
+    if (parts.length < 4) {
+      throw new GitError('Unable to parse last commit information');
+    }
+    
+    return {
+      hash: parts[0],
+      subject: parts[1],
+      author: parts[2],
+      date: parts[3]
+    };
+  } catch (error) {
+    throw new GitError(`Failed to get last commit: ${error}`);
+  }
+}
+
+/**
+ * Check if there are any commits in the repository
+ */
+export async function hasCommits(): Promise<boolean> {
+  try {
+    execGitCommand('log -1 --oneline');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Get git status information
  */
 export async function getGitStatus(): Promise<{
@@ -305,12 +483,4 @@ function calculateSummary(files: GitFile[]): GitDiff['summary'] {
     deletions: files.reduce((sum, file) => sum + file.deletions, 0),
     filesChanged: files.length
   };
-}
-
-/**
- * Commit changes with the given message
- */
-export async function commitChanges(message: string): Promise<void> {
-  // TODO: Phase 2 - Implement git commit functionality
-  throw new Error('Not implemented - Phase 2');
 } 
