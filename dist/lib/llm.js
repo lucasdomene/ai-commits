@@ -1,55 +1,30 @@
 "use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.LLMError = void 0;
-exports.checkOllamaAvailable = checkOllamaAvailable;
-exports.checkModelAvailable = checkModelAvailable;
-exports.generateCommitMessage = generateCommitMessage;
-exports.createCommitPrompt = createCommitPrompt;
-exports.parseCommitMessageResponse = parseCommitMessageResponse;
 /**
  * LLM integration module
  * Phase 3: LLM Integration
+ *
+ * This module has been refactored following SOLID principles:
+ * - Single Responsibility: Each submodule has one clear purpose
+ * - Open/Closed: Easy to extend with new LLM providers
+ * - Liskov Substitution: Error classes can be substituted
+ * - Interface Segregation: Focused interfaces for each concern
+ * - Dependency Inversion: Depends on abstractions, not concretions
  */
-class LLMError extends Error {
-    constructor(message) {
-        super(message);
-        this.name = 'LLMError';
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
     }
-}
-exports.LLMError = LLMError;
-/**
- * Check if Ollama is available and running
- */
-async function checkOllamaAvailable() {
-    // TODO: Phase 3 - Implement Ollama availability check
-    throw new Error('Not implemented - Phase 3');
-}
-/**
- * Check if the specified model is available
- */
-async function checkModelAvailable(model) {
-    // TODO: Phase 3 - Implement model availability check
-    throw new Error('Not implemented - Phase 3');
-}
-/**
- * Generate commit message using LLM
- */
-async function generateCommitMessage(prompt, config) {
-    // TODO: Phase 3 - Implement LLM commit message generation
-    throw new Error('Not implemented - Phase 3');
-}
-/**
- * Create prompt template for commit message generation
- */
-function createCommitPrompt(diff, analysis) {
-    // TODO: Phase 3 - Implement prompt template creation
-    throw new Error('Not implemented - Phase 3');
-}
-/**
- * Parse and validate LLM response
- */
-function parseCommitMessageResponse(response) {
-    // TODO: Phase 3 - Implement response parsing
-    throw new Error('Not implemented - Phase 3');
-}
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __exportStar = (this && this.__exportStar) || function(m, exports) {
+    for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports, p)) __createBinding(exports, m, p);
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+// Re-export all functionality from the modular structure
+__exportStar(require("./llm/index"), exports);
 //# sourceMappingURL=llm.js.map

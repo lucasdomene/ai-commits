@@ -36,6 +36,7 @@
     "typescript": "^5.0.0"
   },
   "dependencies": {
-    "commander": "^11.0.0"
+    "commander": "^11.0.0",
+    "undici": "^7.10.0"
   }
 }

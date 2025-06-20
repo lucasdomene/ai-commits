@@ -1,34 +1,13 @@
-import { LLMResponse, Config } from '../types';
 /**
  * LLM integration module
  * Phase 3: LLM Integration
+ *
+ * This module has been refactored following SOLID principles:
+ * - Single Responsibility: Each submodule has one clear purpose
+ * - Open/Closed: Easy to extend with new LLM providers
+ * - Liskov Substitution: Error classes can be substituted
+ * - Interface Segregation: Focused interfaces for each concern
+ * - Dependency Inversion: Depends on abstractions, not concretions
  */
-export declare class LLMError extends Error {
-    constructor(message: string);
-}
-/**
- * Check if Ollama is available and running
- */
-export declare function checkOllamaAvailable(): Promise<boolean>;
-/**
- * Check if the specified model is available
- */
-export declare function checkModelAvailable(model: string): Promise<boolean>;
-/**
- * Generate commit message using LLM
- */
-export declare function generateCommitMessage(prompt: string, config: Config): Promise<LLMResponse>;
-/**
- * Create prompt template for commit message generation
- */
-export declare function createCommitPrompt(diff: string, analysis: any): string;
-/**
- * Parse and validate LLM response
- */
-export declare function parseCommitMessageResponse(response: string): {
-    type: string;
-    scope?: string;
-    description: string;
-    body?: string;
-};
+export * from './llm/index';
 //# sourceMappingURL=llm.d.ts.map
