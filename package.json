@@ -1,0 +1,40 @@
+{
+  "name": "ai-commits",
+  "version": "0.1.0",
+  "description": "Generate conventional commit messages using local LLM based on your staged changes.",
+  "main": "dist/index.js",
+  "bin": {
+    "ai-commits": "dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/cli.ts",
+    "start": "node dist/cli.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "git",
+    "commit",
+    "ai",
+    "llm",
+    "conventional-commits",
+    "cli"
+  ],
+  "author": "",
+  "license": "MIT",
+  "files": [
+    "dist/**/*",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=16.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "commander": "^11.0.0"
+  }
+}
