@@ -9,8 +9,8 @@
 ## Phase 2: Git Integration
 - [x] Implement git diff --staged parsing
 - [x] Add git status validation (ensure staged changes exist)
-- [ ] Create git commit functionality
-- [ ] Add error handling for git operations
+- [x] Create git commit functionality
+- [x] Add error handling for git operations
 
 ## Phase 3: LLM Integration
 - [ ] Implement Ollama API client

@@ -7,14 +7,85 @@ import { execSync } from 'child_process';
  */
 
 export class GitError extends Error {
-  constructor(message: string) {
+  constructor(message: string, public code?: string, public recoveryHint?: string) {
     super(message);
     this.name = 'GitError';
   }
 }
 
+export class GitRepositoryError extends GitError {
+  constructor(message: string) {
+    super(
+      message,
+      'NOT_A_REPOSITORY',
+      'Make sure you are running this command from within a git repository. Use "git init" to initialize a new repository.'
+    );
+  }
+}
+
+export class GitStagingError extends GitError {
+  constructor(message: string, unstagedCount: number = 0, untrackedCount: number = 0) {
+    const hints = [];
+    if (unstagedCount > 0) {
+      hints.push(`Stage ${unstagedCount} unstaged file(s): git add <files>`);
+    }
+    if (untrackedCount > 0) {
+      hints.push(`Stage ${untrackedCount} untracked file(s): git add <files>`);
+    }
+    if (hints.length === 0) {
+      hints.push('Make some changes and stage them: git add <files>');
+    }
+    
+    super(
+      message,
+      'NO_STAGED_CHANGES',
+      hints.join('\n')
+    );
+  }
+}
+
+export class GitCommitError extends GitError {
+  constructor(message: string, originalError?: string) {
+    let recoveryHint = 'Check your git configuration and try again.';
+    
+    if (originalError?.includes('Please tell me who you are')) {
+      recoveryHint = 'Configure your git identity:\n' +
+        '  git config --global user.name "Your Name"\n' +
+        '  git config --global user.email "your.email@example.com"';
+    } else if (originalError?.includes('nothing to commit')) {
+      recoveryHint = 'Stage some changes before committing:\n' +
+        '  git add <files>  # Stage specific files\n' +
+        '  git add .        # Stage all changes';
+    } else if (originalError?.includes('pathspec') && originalError?.includes('did not match')) {
+      recoveryHint = 'Check that the files you\'re trying to add exist and try again.';
+    }
+    
+    super(message, 'COMMIT_FAILED', recoveryHint);
+  }
+}
+
+export class GitCommandError extends GitError {
+  constructor(command: string, originalError: string, exitCode?: number) {
+    const message = `Git command failed: ${command}`;
+    let recoveryHint = 'Check the command and try again.';
+    
+    // Provide specific hints based on common git errors
+    if (originalError.includes('not a git repository')) {
+      recoveryHint = 'Initialize a git repository with "git init" or navigate to an existing repository.';
+    } else if (originalError.includes('Permission denied')) {
+      recoveryHint = 'Check file permissions and ensure you have write access to the repository.';
+    } else if (originalError.includes('fatal: not a valid object name')) {
+      recoveryHint = 'The repository may be empty or corrupted. Try making an initial commit.';
+    } else if (originalError.includes('index.lock')) {
+      recoveryHint = 'Another git process may be running. Wait for it to finish or remove .git/index.lock if stuck.';
+    }
+    
+    super(message, 'COMMAND_FAILED', recoveryHint);
+  }
+}
+
 /**
- * Execute git command and return output
+ * Execute git command with enhanced error handling
  */
 function execGitCommand(command: string): string {
   try {
@@ -23,8 +94,51 @@ function execGitCommand(command: string): string {
       stdio: ['pipe', 'pipe', 'pipe']
     }).toString();
   } catch (error: any) {
-    throw new GitError(`Git command failed: ${error.message}`);
+    const errorMessage = error.stderr || error.message || 'Unknown git error';
+    const exitCode = error.status;
+    
+    // Handle specific git errors with better messages
+    if (errorMessage.includes('not a git repository')) {
+      throw new GitRepositoryError('Not in a git repository');
+    }
+    
+    throw new GitCommandError(command, errorMessage, exitCode);
   }
+}
+
+/**
+ * Execute git command with timeout and retry logic
+ */
+async function execGitCommandSafe(command: string, retries: number = 1): Promise<string> {
+  let lastError: Error;
+  
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      return execGitCommand(command);
+    } catch (error) {
+      lastError = error as Error;
+      
+      // Don't retry certain errors
+      if (error instanceof GitRepositoryError || 
+          error instanceof GitStagingError ||
+          (error as any).code === 'NOT_A_REPOSITORY') {
+        throw error;
+      }
+      
+      // Only retry on transient errors
+      const errorMessage = (error as any).message || '';
+      if (errorMessage.includes('index.lock') && attempt < retries) {
+        console.warn(`⚠️  Git operation failed (attempt ${attempt}/${retries}), retrying...`);
+        // Wait a bit before retrying
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        continue;
+      }
+      
+      throw error;
+    }
+  }
+  
+  throw lastError!;
 }
 
 /**
@@ -32,9 +146,14 @@ function execGitCommand(command: string): string {
  */
 export async function isGitRepository(): Promise<boolean> {
   try {
-    execGitCommand('rev-parse --git-dir');
+    await execGitCommandSafe('rev-parse --git-dir');
     return true;
-  } catch {
+  } catch (error) {
+    if (error instanceof GitRepositoryError) {
+      return false;
+    }
+    // For other errors, still return false but log the issue
+    console.warn('⚠️  Error checking git repository status:', (error as Error).message);
     return false;
   }
 }
@@ -44,49 +163,42 @@ export async function isGitRepository(): Promise<boolean> {
  */
 export async function hasStagedChanges(): Promise<boolean> {
   try {
-    const output = execGitCommand('diff --staged --name-only');
+    const output = await execGitCommandSafe('diff --staged --name-only');
     return output.trim().length > 0;
-  } catch {
+  } catch (error) {
+    if (error instanceof GitRepositoryError) {
+      throw error;
+    }
+    console.warn('⚠️  Error checking staged changes:', (error as Error).message);
     return false;
   }
 }
 
 /**
- * Validate git repository and staged changes
+ * Validate git repository and staged changes with enhanced error handling
  */
 export async function validateGitState(): Promise<void> {
   // Check if we're in a git repository
   if (!(await isGitRepository())) {
-    throw new GitError('Not in a git repository. Please run this command from within a git repository.');
+    throw new GitRepositoryError('Not in a git repository. Please run this command from within a git repository.');
   }
 
   // Check if there are any staged changes
   if (!(await hasStagedChanges())) {
-    const status = await getGitStatus();
-    
-    if (status.unstaged.length > 0) {
-      throw new GitError(
-        `No staged changes found. You have ${status.unstaged.length} unstaged file(s).\n` +
-        'Please stage your changes first:\n' +
-        '  git add <files>  # Stage specific files\n' +
-        '  git add .        # Stage all changes'
+    try {
+      const status = await getGitStatus();
+      throw new GitStagingError(
+        'No staged changes found',
+        status.unstaged.length,
+        status.untracked.length
       );
+    } catch (error) {
+      if (error instanceof GitStagingError) {
+        throw error;
+      }
+      // If we can't get status, provide a generic staging error
+      throw new GitStagingError('No staged changes found. Please stage some changes before proceeding.');
     }
-    
-    if (status.untracked.length > 0) {
-      throw new GitError(
-        `No staged changes found. You have ${status.untracked.length} untracked file(s).\n` +
-        'Please stage your changes first:\n' +
-        '  git add <files>  # Stage specific files\n' +
-        '  git add .        # Stage all changes'
-      );
-    }
-    
-    throw new GitError(
-      'No staged changes found. Please stage some changes before generating a commit message:\n' +
-      '  git add <files>  # Stage specific files\n' +
-      '  git add .        # Stage all changes'
-    );
   }
 }
 
@@ -95,20 +207,20 @@ export async function validateGitState(): Promise<void> {
  */
 export function validateCommitMessage(message: string): void {
   if (!message || !message.trim()) {
-    throw new GitError('Commit message cannot be empty');
+    throw new GitCommitError('Commit message cannot be empty');
   }
 
   const trimmedMessage = message.trim();
   
   // Check minimum length
   if (trimmedMessage.length < 10) {
-    throw new GitError('Commit message is too short (minimum 10 characters)');
+    throw new GitCommitError('Commit message is too short (minimum 10 characters)');
   }
 
   // Check maximum length for first line
   const firstLine = trimmedMessage.split('\n')[0];
   if (firstLine.length > 100) {
-    throw new GitError('Commit message first line is too long (maximum 100 characters)');
+    throw new GitCommitError('Commit message first line is too long (maximum 100 characters)');
   }
 
   // Check for conventional commit format (optional but recommended)
@@ -121,7 +233,7 @@ export function validateCommitMessage(message: string): void {
 }
 
 /**
- * Commit changes with the given message
+ * Commit changes with enhanced error handling
  */
 export async function commitChanges(message: string): Promise<void> {
   try {
@@ -131,8 +243,8 @@ export async function commitChanges(message: string): Promise<void> {
     // Validate commit message
     validateCommitMessage(message);
     
-    // Execute git commit
-    const output = execGitCommand(`commit -m "${message.replace(/"/g, '\\"')}"`);
+    // Execute git commit with retry logic
+    const output = await execGitCommandSafe(`commit -m "${message.replace(/"/g, '\\"')}"`, 2);
     
     // Parse commit output to get commit hash
     const commitMatch = output.match(/\[.+\s([a-f0-9]+)\]/);
@@ -148,16 +260,24 @@ export async function commitChanges(message: string): Promise<void> {
     
   } catch (error) {
     if (error instanceof GitError) {
+      // Re-throw git errors with recovery hints
+      if (error.recoveryHint) {
+        console.error(`\n💡 Recovery suggestion:\n${error.recoveryHint}`);
+      }
       throw error;
     }
-    throw new GitError(`Failed to commit changes: ${error}`);
+    
+    // Wrap unexpected errors
+    throw new GitCommitError(`Failed to commit changes: ${(error as Error).message}`, (error as Error).message);
   }
 }
 
 /**
- * Commit changes with a multi-line message (subject + body)
+ * Commit changes with a multi-line message (subject + body) with enhanced error handling
  */
 export async function commitChangesWithBody(subject: string, body?: string): Promise<void> {
+  let tempFile: string | null = null;
+  
   try {
     // Validate git state first
     await validateGitState();
@@ -169,40 +289,43 @@ export async function commitChangesWithBody(subject: string, body?: string): Pro
     validateCommitMessage(fullMessage);
     
     // Use git commit with -F flag for multi-line messages
-    const tempFile = '/tmp/ai-commits-message.txt';
+    tempFile = `/tmp/ai-commits-message-${Date.now()}.txt`;
     require('fs').writeFileSync(tempFile, fullMessage);
     
-    try {
-      const output = execGitCommand(`commit -F "${tempFile}"`);
-      
-      // Clean up temp file
-      require('fs').unlinkSync(tempFile);
-      
-      // Parse commit output
-      const commitMatch = output.match(/\[.+\s([a-f0-9]+)\]/);
-      const commitHash = commitMatch ? commitMatch[1] : 'unknown';
-      
-      console.log(`✅ Commit successful: ${commitHash}`);
-      
-      // Show commit summary
-      const summary = parseCommitOutput(output);
-      if (summary.filesChanged > 0) {
-        console.log(`📊 ${summary.filesChanged} file(s) changed, ${summary.insertions} insertion(s), ${summary.deletions} deletion(s)`);
-      }
-      
-    } catch (error) {
-      // Clean up temp file on error
-      try {
-        require('fs').unlinkSync(tempFile);
-      } catch {}
-      throw error;
+    const output = await execGitCommandSafe(`commit -F "${tempFile}"`, 2);
+    
+    // Parse commit output
+    const commitMatch = output.match(/\[.+\s([a-f0-9]+)\]/);
+    const commitHash = commitMatch ? commitMatch[1] : 'unknown';
+    
+    console.log(`✅ Commit successful: ${commitHash}`);
+    
+    // Show commit summary
+    const summary = parseCommitOutput(output);
+    if (summary.filesChanged > 0) {
+      console.log(`📊 ${summary.filesChanged} file(s) changed, ${summary.insertions} insertion(s), ${summary.deletions} deletion(s)`);
     }
     
   } catch (error) {
     if (error instanceof GitError) {
+      // Re-throw git errors with recovery hints
+      if (error.recoveryHint) {
+        console.error(`\n💡 Recovery suggestion:\n${error.recoveryHint}`);
+      }
       throw error;
     }
-    throw new GitError(`Failed to commit changes: ${error}`);
+    
+    // Wrap unexpected errors
+    throw new GitCommitError(`Failed to commit changes: ${(error as Error).message}`, (error as Error).message);
+  } finally {
+    // Clean up temp file
+    if (tempFile) {
+      try {
+        require('fs').unlinkSync(tempFile);
+      } catch (cleanupError) {
+        console.warn(`⚠️  Warning: Could not clean up temporary file ${tempFile}`);
+      }
+    }
   }
 }
 
@@ -229,7 +352,7 @@ function parseCommitOutput(output: string): {
 }
 
 /**
- * Get the last commit information
+ * Get the last commit information with error handling
  */
 export async function getLastCommit(): Promise<{
   hash: string;
@@ -238,11 +361,11 @@ export async function getLastCommit(): Promise<{
   date: string;
 }> {
   try {
-    const output = execGitCommand('log -1 --pretty=format:"%H|%s|%an|%ad" --date=short');
+    const output = await execGitCommandSafe('log -1 --pretty=format:"%H|%s|%an|%ad" --date=short');
     const parts = output.split('|');
     
     if (parts.length < 4) {
-      throw new GitError('Unable to parse last commit information');
+      throw new GitError('Unable to parse last commit information', 'PARSE_ERROR');
     }
     
     return {
@@ -252,7 +375,10 @@ export async function getLastCommit(): Promise<{
       date: parts[3]
     };
   } catch (error) {
-    throw new GitError(`Failed to get last commit: ${error}`);
+    if (error instanceof GitError) {
+      throw error;
+    }
+    throw new GitError(`Failed to get last commit: ${(error as Error).message}`, 'COMMIT_INFO_FAILED');
   }
 }
 
@@ -261,15 +387,25 @@ export async function getLastCommit(): Promise<{
  */
 export async function hasCommits(): Promise<boolean> {
   try {
-    execGitCommand('log -1 --oneline');
+    await execGitCommandSafe('log -1 --oneline');
     return true;
-  } catch {
+  } catch (error) {
+    // If the error is about no commits, return false
+    const errorMessage = (error as any).message || '';
+    if (errorMessage.includes('does not have any commits yet') || 
+        errorMessage.includes('bad default revision') ||
+        errorMessage.includes('ambiguous argument \'HEAD\'')) {
+      return false;
+    }
+    
+    // For other errors, still return false but log
+    console.warn('⚠️  Error checking commit history:', errorMessage);
     return false;
   }
 }
 
 /**
- * Get git status information
+ * Get git status information with error handling
  */
 export async function getGitStatus(): Promise<{
   staged: string[];
@@ -277,7 +413,7 @@ export async function getGitStatus(): Promise<{
   untracked: string[];
 }> {
   try {
-    const output = execGitCommand('status --porcelain');
+    const output = await execGitCommandSafe('status --porcelain');
     const lines = output.trim().split('\n').filter(line => line.trim());
     
     const staged: string[] = [];
@@ -309,7 +445,10 @@ export async function getGitStatus(): Promise<{
     
     return { staged, unstaged, untracked };
   } catch (error) {
-    throw new GitError(`Failed to get git status: ${error}`);
+    if (error instanceof GitError) {
+      throw error;
+    }
+    throw new GitError(`Failed to get git status: ${(error as Error).message}`, 'STATUS_FAILED');
   }
 }
 
@@ -359,7 +498,7 @@ export async function getDetailedGitStatus(): Promise<{
 }
 
 /**
- * Get the diff of staged changes
+ * Get the diff of staged changes with error handling
  */
 export async function getStagedDiff(): Promise<GitDiff> {
   // Validate git state before getting diff
@@ -367,11 +506,11 @@ export async function getStagedDiff(): Promise<GitDiff> {
   
   try {
     // Get the diff with file stats
-    const diffOutput = execGitCommand('diff --staged --numstat');
-    const diffContent = execGitCommand('diff --staged');
+    const diffOutput = await execGitCommandSafe('diff --staged --numstat');
+    const diffContent = await execGitCommandSafe('diff --staged');
     
     if (!diffOutput.trim()) {
-      throw new GitError('No staged changes found');
+      throw new GitStagingError('No staged changes found');
     }
 
     const files = parseDiffOutput(diffOutput, diffContent);
@@ -385,7 +524,7 @@ export async function getStagedDiff(): Promise<GitDiff> {
     if (error instanceof GitError) {
       throw error;
     }
-    throw new GitError(`Failed to get staged diff: ${error}`);
+    throw new GitError(`Failed to get staged diff: ${(error as Error).message}`, 'DIFF_FAILED');
   }
 }
 
